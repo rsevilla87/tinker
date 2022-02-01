@@ -11,7 +11,7 @@ gcloud container clusters create "$name" \
 cilium install
 kubectl create -f cm-kernel.yaml
 envsubst < ds-kernel.yaml
-export KERNEL_VERSION=5.16
+export KERNEL_VERSION=${KERNEL:-v5.4}
 envsubst < ds-kernel.yaml | kubectl apply -f -
 kubectl rollout status ds/node-initializer
 for node in $(kubectl get nodes -o=custom-columns=:.metadata.name | grep -v -e '^[[:space:]]*$'); do
