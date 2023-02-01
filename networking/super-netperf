@@ -1,0 +1,50 @@
+#
+# This work came from inspiration from : https://github.com/borkmann/stuff/blob/master/super_netperf
+#
+# We wanted to take advantage of NetPerf's OMNI output for our work. To do this, we had to make some modifications.
+#
+# run_netperf(number_of_netperfs)
+#
+run_netperf() {
+    loops=$1
+    shift
+    for ((i=0; i<loops; i++)); do
+        netperf -s 2 $@ 2>&1 > result-${i} &
+    done
+    wait
+    return 0
+}
+
+#
+# Assumption here is the user passed the -- -k rt_latency,p99_latency,throughput,throughput_units
+# Which is taking advantage of the OMNI output
+#
+process_netperf() {
+    tp=0 # Throughput
+    l=0	 # Latency 
+    rtl=0 # RT latency
+    u=""
+    top=""
+    for file in `ls result-*`; do 
+      top=$(head -n 1 $file)
+      t=$(cat $file | grep "THROUGHPUT=" | awk -F= '{print $2}')
+      rrtl=$(cat $file | grep "RT_LATENCY=" | awk -F= '{print $2}')
+      if [[ $rrtl == "-1.000" ]]; then
+        rtl="-1.000"
+      else
+        rtl=$(echo $rtl+$rrtl | bc)
+      fi
+      rl=$(cat $file | grep "P99_LATENCY=" | awk -F= '{print $2}')
+      l=$(echo $l+rl | bc)
+      tp=$(echo $tp+$t | bc)
+      u=$(cat $file | grep "UNITS")
+      mv $file old-$file
+    done 
+    echo "$top"
+    echo "RT_LATENCY=$rtl"
+    echo "P99_LATENCY=$rl"
+    echo "THROUGHPUT=$tp"
+    echo "$u"
+}
+run_netperf $@
+process_netperf
