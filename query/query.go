@@ -33,7 +33,18 @@ type Hits struct {
 	} `json:"hits"`
 }
 
+type Value struct {
+	Name  string
+	Value float32
+}
+
 type ContainerMetrics struct {
+	Namespace string
+	Metric    string
+	Values    []Value
+}
+
+type ContainerJsonMetrics struct {
 	Aggregation struct {
 		Containers struct {
 			Buckets []struct {
@@ -80,19 +91,27 @@ type Collection struct {
 func main() {
 
 	// Namespaces we want to aggregate data from
-	ns := []string{"openshift-etcd", "openshift-apiserver", "openshift-ovn-kubernetes"}
+	ns := []string{"openshift-etcd", "openshift-apiserver", "openshift-ovn-kubernetes", "openshift-kube-apiserver"}
 
 	// Metrics we are interested in
-	metrics := []string{"containerCPU-Masters"}
+	metrics := []string{"containerCPU-Masters", "containerMemory-Masters"}
 
 	var col []Collection
 	fplat := flag.String("platforms", "AWS", "Platforms to filter on, pass as AWS,ROSA")
 	fwork := flag.String("workloads", "cluster-density", "Workloads to filter on, pass as cluster-density,node-density")
 	fver := flag.String("version", "4.12*", "Version to search on, use * to wildcard")
+	minNodes := flag.Int("minNodes", 0, "Minimum node count")
+	maxNodes := flag.Int("maxNodes", 0, "Max node count")
 	flag.Parse()
 	log.Infof("Platform Filter : %s", *fplat)
 	log.Infof("Workload Filter : %s", *fwork)
 	log.Infof("Version Query : %s", *fver)
+	if *minNodes > 0 {
+		log.Infof("Min Node Filter : %d", *minNodes)
+	}
+	if *maxNodes > 0 {
+		log.Infof("Min Node Filter : %d", *maxNodes)
+	}
 	server := os.Getenv("ES_URL")
 	if len(server) < 1 {
 		log.Error("ES_URL env var cannot be empty")
@@ -163,7 +182,17 @@ func main() {
 	json.NewDecoder(result.Body).Decode(&d)
 	log.Infof("Found %d results\n", len(d.HitLists.Hit))
 	for _, v := range d.HitLists.Hit {
-		if v.Results.Result != "Complete" {
+		if *minNodes > 0 {
+			if v.Results.Nodes < *minNodes {
+				continue
+			}
+		}
+		if *maxNodes > 0 {
+			if v.Results.Nodes > *maxNodes {
+				continue
+			}
+		}
+		if v.Results.Result == "Failed" {
 			log.Warnf("UUID %s Resulted in %s", v.Results.UUID, v.Results.Result)
 			continue
 		}
@@ -207,6 +236,7 @@ func main() {
 		time := time.UnixMilli(t)
 		log.Infof("Test Ran at %s Node count : %d", time.UTC(), v.Results.Nodes)
 		for _, n := range ns {
+			var cm ContainerJsonMetrics
 			for _, m := range metrics {
 				q := fmt.Sprintf(`"query": {"bool": {"filter": [{"wildcard": {
 										"labels.namespace.keyword": "%s"}},{
@@ -224,10 +254,18 @@ func main() {
 					log.Error("Error with search")
 					os.Exit(1)
 				}
-				var cm ContainerMetrics
 				json.NewDecoder(r.Body).Decode(&cm)
 				if len(cm.Aggregation.Containers.Buckets) > 0 {
-					c.Metrics = append(c.Metrics, cm)
+					var metric ContainerMetrics
+					metric.Metric = m
+					metric.Namespace = n
+					for _, pm := range cm.Aggregation.Containers.Buckets {
+						var Data Value
+						Data.Name = pm.Name
+						Data.Value = pm.Value.Value
+						metric.Values = append(metric.Values, Data)
+					}
+					c.Metrics = append(c.Metrics, metric)
 				}
 			}
 		}
@@ -237,19 +275,24 @@ func main() {
 	}
 	if len(col) > 0 {
 		for _, r := range col {
-			log.Infof("%-25s | %-15s | %-15s | %-40s | %-15s | %-25s | %-5s | %s", "Version", "Workload", "Platform", "UUID", "Number of Nodes", "Workload Iterations", "Churn", "Date")
+			log.Infof("%-35s | %-15s | %-15s | %-40s | %-15s | %-25s | %-5s | %s", "Version", "Workload", "Platform", "UUID", "Number of Nodes", "Workload Iterations", "Churn", "Date")
 			log.Infof("%s", strings.Repeat("-", (25+45+40+15+25+45)))
 			t, _ := strconv.ParseInt(r.Timestamp, 10, 64)
 			time := time.UnixMilli(t)
-			log.Infof("%-25s | %-15s | %-15s | %-40s | %-15d | %-25d | %-5t | %s", r.Version, r.Workload, r.Platform, r.UUID, r.Nodes, r.Iterations, r.Churn, time)
-			log.Infof("+ %-45s | %-25s", "Container", "Metric Value")
-			log.Infof("+ %s", strings.Repeat("-", (45+25)))
+			log.Infof("+ %s", strings.Repeat("-", (75+65)))
+			log.Infof("%-35s | %-15s | %-15s | %-40s | %-15d | %-25d | %-5t | %s", r.Version, r.Workload, r.Platform, r.UUID, r.Nodes, r.Iterations, r.Churn, time)
+			log.Infof("+ %s", strings.Repeat("-", (75+65)))
 			for _, m := range r.Metrics {
-				for _, v := range m.Aggregation.Containers.Buckets {
-					log.Infof("+ %-45s | %-25f", v.Name, v.Value.Value)
+				log.Infof("+ %-35s | %-45s | %-25s ", "Namespace", "Container", m.Metric)
+				log.Infof("+ %s", strings.Repeat("-", (75+65)))
+				for _, d := range m.Values {
+					log.Infof("+ %-35s | %-45s | %-25f ", m.Namespace, d.Name, d.Value)
 				}
+				log.Infof("+ %s", strings.Repeat("-", (75+65)))
 			}
 			log.Infof("%s", strings.Repeat("-", (25+45+40+15+25+45)))
 		}
+	} else {
+		log.Warn("No metrics to present")
 	}
 }
