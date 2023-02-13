@@ -25,8 +25,7 @@ process_netperf() {
     rtl=0 # RT latency
     u=""
     top=""
-    for f in `ls /tmp/result-*`; do 
-      file="/tmp/$f"
+    for file in `ls /tmp/result-*`; do 
       top=$(head -n 1 $file)
       t=$(cat $file | grep "THROUGHPUT=" | awk -F= '{print $2}')
       rrtl=$(cat $file | grep "RT_LATENCY=" | awk -F= '{print $2}')
