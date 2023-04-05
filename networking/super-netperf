@@ -38,7 +38,8 @@ process_netperf() {
       l=$(echo $l+rl | bc)
       tp=$(echo $tp+$t | bc)
       u=$(cat $file | grep "UNITS")
-      mv $file /tmp/old-$file
+      filename=$(basename $file)
+      mv $file /tmp/old-$filename
     done 
     echo "$top"
     echo "RT_LATENCY=$rtl"
