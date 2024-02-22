@@ -8,8 +8,11 @@
 run_netperf() {
     loops=$1
     shift
+    port=$2
+    shift
     for ((i=0; i<loops; i++)); do
-        netperf -s 2 $@ 2>&1 > /tmp/result-${i} &
+        netperf -s 2 $@ -P $port 2>&1 > /tmp/result-${i} &
+        ((port++))
     done
     wait
     return 0
